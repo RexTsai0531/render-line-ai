@@ -302,20 +302,20 @@ def handle_age_gate(text: str, reply_token: str, user_id: Optional[str], message
     normalized = text.strip().lower()
     store_passwords = retrieve_store_passwords()
 
+    if normalized in AGE_NEGATIVE:
+        if user_id:
+            set_user_state(user_id, UserState(age_gate="", pending_store=""))
+        reply_to_line(reply_token, "因您未滿18歲，請您盡速離開本場所，避免觸法。")
+        return True
+
+    if normalized in AGE_AFFIRMATIVE:
+        if user_id:
+            set_user_state(user_id, UserState(age_gate="awaiting_store", pending_store=""))
+        store_list = "、".join(store_passwords.keys()) if store_passwords else "請先提供店名"
+        reply_to_line(reply_token, f"請問您是在哪一間店？可提供店名：{store_list}")
+        return True
+
     if message_type == "image" or state.age_gate == "awaiting_age":
-        if normalized in AGE_NEGATIVE:
-            if user_id:
-                set_user_state(user_id, UserState(age_gate="", pending_store=""))
-            reply_to_line(reply_token, "因您未滿18歲，請您盡速離開本場所，避免觸法。")
-            return True
-
-        if normalized in AGE_AFFIRMATIVE:
-            if user_id:
-                set_user_state(user_id, UserState(age_gate="awaiting_store", pending_store=""))
-            store_list = "、".join(store_passwords.keys()) if store_passwords else "請先提供店名"
-            reply_to_line(reply_token, f"請問您是在哪一間店？可提供店名：{store_list}")
-            return True
-
         if message_type == "image":
             if user_id:
                 set_user_state(user_id, UserState(age_gate="awaiting_age", pending_store=""))
