@@ -54,6 +54,9 @@ The bot will call Supabase first. If Supabase is unavailable, it falls back to l
 
 Use `work/supabase_knowledge_seed.sql` to seed the private客服 knowledge base.
 
+Use `work/supabase_store_passwords_schema.sql` to create the private `store_passwords` table.
+Use `work/supabase_store_passwords_template.sql` as a template to insert store names and passwords.
+
 ## Commands
 
 - `help` - show available commands
