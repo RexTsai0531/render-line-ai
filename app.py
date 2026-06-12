@@ -119,6 +119,36 @@ def reply_to_line(reply_token: str, text: str) -> None:
         raise
 
 
+def push_to_line(user_id: str, text: str) -> None:
+    channel_access_token = require_env("LINE_CHANNEL_ACCESS_TOKEN")
+    response = requests.post(
+        f"{LINE_API_BASE}/v2/bot/message/push",
+        headers={
+            "Authorization": f"Bearer {channel_access_token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "to": user_id,
+            "messages": [
+                {
+                    "type": "text",
+                    "text": text[:5000],
+                }
+            ],
+        },
+        timeout=30,
+    )
+    try:
+        response.raise_for_status()
+    except requests.HTTPError:
+        logging.exception(
+            "LINE push API error status=%s body=%s",
+            response.status_code,
+            response.text,
+        )
+        raise
+
+
 def extract_user_text(event: dict) -> Optional[str]:
     message = event.get("message", {})
     if event.get("type") != "message":
@@ -157,13 +187,25 @@ def webhook():
             reply_to_line(reply_token, "Only text messages are supported.")
             continue
 
+        source = event.get("source", {})
+        user_id = source.get("userId")
+
+        try:
+            reply_to_line(reply_token, "收到，正在思考中...")
+        except requests.RequestException:
+            logging.exception("Failed to send immediate acknowledgement")
+            continue
+
         try:
             answer = ask_openai(text)
         except requests.RequestException as exc:
             answer = f"AI service temporarily unavailable: {exc.__class__.__name__}"
 
         try:
-            reply_to_line(reply_token, answer)
+            if user_id:
+                push_to_line(user_id, answer)
+            else:
+                logging.warning("No userId available for push message")
         except requests.RequestException:
             continue
 
