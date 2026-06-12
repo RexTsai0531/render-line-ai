@@ -170,11 +170,6 @@ def handle_message(event: dict) -> None:
     user_id = (event.get("source") or {}).get("userId")
 
     try:
-        reply_to_line(reply_token, "收到，正在思考中...")
-    except requests.RequestException:
-        logging.exception("Failed to send immediate acknowledgement")
-
-    try:
         answer = ask_openai(text)
     except requests.RequestException as exc:
         answer = f"AI service temporarily unavailable: {exc.__class__.__name__}"
