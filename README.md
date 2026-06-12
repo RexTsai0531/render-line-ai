@@ -34,7 +34,7 @@
 1. 將這個專案推到 GitHub
 2. 在 Render 建立 Web Service
 3. Build Command 設成 `pip install -r requirements.txt`
-4. Start Command 設成 `gunicorn wsgi:app --bind 0.0.0.0:$PORT`
+4. Start Command 設成 `gunicorn wsgi:app --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 120`
 5. 把 LINE Webhook URL 設成 `https://你的服務網域/webhook`
 
 ## LINE 設定

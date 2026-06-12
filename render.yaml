@@ -4,6 +4,6 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 120
     healthCheckPath: /
     autoDeploy: true
