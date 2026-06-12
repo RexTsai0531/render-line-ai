@@ -17,7 +17,7 @@
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `OPENAI_API_KEY`
 - `OPENAI_API_BASE`，如果你用 NVIDIA 相容 OpenAI API，就填你的 NVIDIA endpoint
-- `OPENAI_MODEL`，預設 `gpt-4.1-mini`
+- `OPENAI_MODEL`，預設 `step-3.7-flash`
 - `OPENAI_TIMEOUT_SECONDS`，選填，預設 `60`
 - `SYSTEM_PROMPT`，選填
 
@@ -25,7 +25,7 @@
 
 - `OPENAI_API_KEY` = 你的 NVIDIA API Key
 - `OPENAI_API_BASE` = NVIDIA 提供的 OpenAI 相容 base URL
-- `OPENAI_MODEL` = 你的模型名稱，例如 `minimax-m2.7`
+- `OPENAI_MODEL` = 你的模型名稱，例如 `step-3.7-flash`
 
 如果你的 NVIDIA 服務文件有指定不同的 base URL 或模型名稱，請以那份文件為準。
 

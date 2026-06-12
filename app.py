@@ -39,7 +39,7 @@ def ask_openai(prompt: str) -> str:
         return "Missing OPENAI_API_KEY in Render environment variables."
 
     api_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
-    model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+    model = os.getenv("OPENAI_MODEL", "step-3.7-flash")
     request_timeout = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
     system_prompt = os.getenv(
         "SYSTEM_PROMPT",
