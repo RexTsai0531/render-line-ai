@@ -1,7 +1,7 @@
 import base64
 import hashlib
 import hmac
-import json
+import logging
 import os
 from typing import Optional
 
@@ -10,7 +10,7 @@ from flask import Flask, abort, jsonify, request
 
 
 app = Flask(__name__)
-
+logging.basicConfig(level=logging.INFO)
 
 LINE_API_BASE = "https://api.line.me"
 
@@ -36,13 +36,13 @@ def verify_line_signature(body: bytes, signature: str) -> bool:
 def ask_openai(prompt: str) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return "目前沒有設定 OPENAI_API_KEY，請先完成 Render 環境變數設定。"
+        return "Missing OPENAI_API_KEY in Render environment variables."
 
     api_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
     model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
     system_prompt = os.getenv(
         "SYSTEM_PROMPT",
-        "你是一個親切、簡潔、實用的 LINE AI 助理。請用繁體中文回答，內容要精準、可直接執行。"
+        "You are a helpful LINE AI assistant. Reply in Traditional Chinese and be concise.",
     )
 
     payload = {
@@ -78,7 +78,16 @@ def ask_openai(prompt: str) -> str:
         json=payload,
         timeout=30,
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError:
+        logging.exception(
+            "OpenAI-compatible API error status=%s body=%s",
+            response.status_code,
+            response.text,
+        )
+        raise
+
     data = response.json()
 
     text = data.get("output_text")
@@ -93,7 +102,8 @@ def ask_openai(prompt: str) -> str:
                 if value:
                     return str(value).strip()
 
-    return "我剛剛有收到訊息，但沒有拿到可讀取的 AI 回覆。"
+    logging.warning("No text returned from OpenAI-compatible API response: %s", data)
+    return "AI returned an empty response."
 
 
 def reply_to_line(reply_token: str, text: str) -> None:
@@ -115,7 +125,15 @@ def reply_to_line(reply_token: str, text: str) -> None:
         },
         timeout=30,
     )
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError:
+        logging.exception(
+            "LINE reply API error status=%s body=%s",
+            response.status_code,
+            response.text,
+        )
+        raise
 
 
 def extract_user_text(event: dict) -> Optional[str]:
@@ -153,13 +171,13 @@ def webhook():
 
         text = extract_user_text(event)
         if not text:
-            reply_to_line(reply_token, "目前我只會處理文字訊息。")
+            reply_to_line(reply_token, "Only text messages are supported.")
             continue
 
         try:
             answer = ask_openai(text)
         except requests.RequestException as exc:
-            answer = f"AI 服務暫時不可用：{exc.__class__.__name__}"
+            answer = f"AI service temporarily unavailable: {exc.__class__.__name__}"
 
         try:
             reply_to_line(reply_token, answer)
