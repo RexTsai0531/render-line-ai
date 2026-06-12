@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import logging
 import os
+import threading
 from typing import Optional
 
 import requests
@@ -77,7 +78,6 @@ def ask_openai(prompt: str) -> str:
         raise
 
     data = response.json()
-
     choices = data.get("choices", [])
     if choices:
         message = choices[0].get("message", {})
@@ -99,12 +99,7 @@ def reply_to_line(reply_token: str, text: str) -> None:
         },
         json={
             "replyToken": reply_token,
-            "messages": [
-                {
-                    "type": "text",
-                    "text": text[:5000],
-                }
-            ],
+            "messages": [{"type": "text", "text": text[:5000]}],
         },
         timeout=30,
     )
@@ -129,12 +124,7 @@ def push_to_line(user_id: str, text: str) -> None:
         },
         json={
             "to": user_id,
-            "messages": [
-                {
-                    "type": "text",
-                    "text": text[:5000],
-                }
-            ],
+            "messages": [{"type": "text", "text": text[:5000]}],
         },
         timeout=30,
     )
@@ -158,6 +148,40 @@ def extract_user_text(event: dict) -> Optional[str]:
     return message.get("text")
 
 
+def handle_message(event: dict) -> None:
+    reply_token = event.get("replyToken")
+    if not reply_token:
+        return
+
+    text = extract_user_text(event)
+    if not text:
+        try:
+            reply_to_line(reply_token, "Only text messages are supported.")
+        except requests.RequestException:
+            logging.exception("Failed to send non-text warning")
+        return
+
+    user_id = (event.get("source") or {}).get("userId")
+
+    try:
+        reply_to_line(reply_token, "收到，正在思考中...")
+    except requests.RequestException:
+        logging.exception("Failed to send immediate acknowledgement")
+
+    try:
+        answer = ask_openai(text)
+    except requests.RequestException as exc:
+        answer = f"AI service temporarily unavailable: {exc.__class__.__name__}"
+
+    try:
+        if user_id:
+            push_to_line(user_id, answer)
+        else:
+            logging.warning("No userId available for push message")
+    except requests.RequestException:
+        logging.exception("Failed to push final answer")
+
+
 @app.get("/")
 def healthcheck():
     return jsonify({"status": "ok"})
@@ -178,36 +202,7 @@ def webhook():
     events = payload.get("events", [])
 
     for event in events:
-        reply_token = event.get("replyToken")
-        if not reply_token:
-            continue
-
-        text = extract_user_text(event)
-        if not text:
-            reply_to_line(reply_token, "Only text messages are supported.")
-            continue
-
-        source = event.get("source", {})
-        user_id = source.get("userId")
-
-        try:
-            reply_to_line(reply_token, "收到，正在思考中...")
-        except requests.RequestException:
-            logging.exception("Failed to send immediate acknowledgement")
-            continue
-
-        try:
-            answer = ask_openai(text)
-        except requests.RequestException as exc:
-            answer = f"AI service temporarily unavailable: {exc.__class__.__name__}"
-
-        try:
-            if user_id:
-                push_to_line(user_id, answer)
-            else:
-                logging.warning("No userId available for push message")
-        except requests.RequestException:
-            continue
+        threading.Thread(target=handle_message, args=(event,), daemon=True).start()
 
     return jsonify({"ok": True})
 

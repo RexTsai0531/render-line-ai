@@ -6,7 +6,7 @@
 
 - 驗證 LINE Webhook 簽章
 - 收到文字訊息後呼叫 OpenAI 產生回覆
-- 先即時回覆「正在思考」，再用 push message 傳正式答案
+- 先即時回覆「正在思考」，再在背景執行 LLM 並用 push message 傳正式答案
 - 提供 `/` health check
 - 提供 `/webhook` 給 LINE Messaging API 使用
 
