@@ -453,6 +453,17 @@ AGE_AFFIRMATIVE = {"1", "是", "是的", "滿了", "已滿", "滿18", "已滿18�
 AGE_NEGATIVE = {"2", "未滿18歲", "未成年", "不是", "否"}
 
 
+def format_store_list(store_names: list[str]) -> str:
+    if not store_names:
+        return "請先提供店名"
+    labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    lines = []
+    for idx, store_name in enumerate(store_names):
+        prefix = labels[idx] if idx < len(labels) else str(idx + 1)
+        lines.append(f"{prefix}. {store_name}")
+    return "\n".join(lines)
+
+
 def handle_age_gate(text: str, reply_token: str, user_id: Optional[str], message_type: str) -> bool:
     state = get_user_state(user_id)
     normalized = text.strip().lower()
@@ -467,8 +478,8 @@ def handle_age_gate(text: str, reply_token: str, user_id: Optional[str], message
     if normalized in AGE_AFFIRMATIVE:
         if user_id:
             set_user_state(user_id, UserState(age_gate="awaiting_store", pending_store=""))
-        store_list = "、".join(store_passwords.keys()) if store_passwords else "請先提供店名"
-        reply_to_line(reply_token, f"請問您是在哪一間店？可提供店名：{store_list}")
+        store_list = format_store_list(list(store_passwords.keys()))
+        reply_to_line(reply_token, f"請問您是在哪一間店？\n{store_list}")
         return True
 
     if message_type == "image" or state.age_gate == "awaiting_age":
@@ -488,8 +499,8 @@ def handle_age_gate(text: str, reply_token: str, user_id: Optional[str], message
                     clear_user_state(user_id)
                 reply_to_line(reply_token, f"{store_name} 的門禁密碼是 {password}")
                 return True
-        store_list = "、".join(store_passwords.keys()) if store_passwords else "請先提供店名"
-        reply_to_line(reply_token, f"請先告訴我您是在哪一間店。可提供店名：{store_list}")
+        store_list = format_store_list(list(store_passwords.keys()))
+        reply_to_line(reply_token, f"請先告訴我您是在哪一間店。\n{store_list}")
         return True
 
     return False
