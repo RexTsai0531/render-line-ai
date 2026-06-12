@@ -149,7 +149,15 @@ def verify_line_signature(body: bytes, signature: str) -> bool:
 
 
 def normalize_text(text: str) -> str:
-    return " ".join(text.lower().split())
+    normalized = text.lower()
+    for ch in "。、，,。！？!？：:；;（）()[]{}<>「」『』\"'`~@#$%^&*-_=+/\\| ":
+        normalized = normalized.replace(ch, "")
+    return normalized
+
+
+def contains_any(text: str, keywords: list[str]) -> bool:
+    normalized = normalize_text(text)
+    return any(normalize_text(keyword) in normalized for keyword in keywords)
 
 
 def score_entry(entry: dict[str, Any], query: str) -> int:
@@ -164,6 +172,14 @@ def score_entry(entry: dict[str, Any], query: str) -> int:
         if term and term in text:
             score += 1
     return score
+
+
+def match_one_of(text: str, candidates: list[str]) -> Optional[str]:
+    normalized_text = normalize_text(text)
+    matched = [candidate for candidate in candidates if normalize_text(candidate) in normalized_text]
+    if len(matched) == 1:
+        return matched[0]
+    return None
 
 
 def retrieve_knowledge(query: str, limit: int = 4) -> list[dict[str, Any]]:
@@ -449,6 +465,131 @@ def handle_command(text: str, reply_token: str, user_id: Optional[str]) -> bool:
     return False
 
 
+def handle_customer_service_intent(text: str, reply_token: str) -> bool:
+    normalized = normalize_text(text)
+
+    if contains_any(text, ["商品目錄", "目錄", "推薦商品", "商品推薦", "商品有哪些"]):
+        reply_to_line(
+            reply_token,
+            "我們的商品目錄如下：\nhttps://520sexshop.com/shop-2/\n\n請告訴我您想看的商品類別與預算，我再幫您推薦。",
+        )
+        return True
+
+    if contains_any(text, ["可推薦的商品類別", "商品類別", "類別", "分類", "推薦類別"]):
+        reply_to_line(
+            reply_token,
+            "可推薦的商品類別如下：\n"
+            "A. 震動棒棒\n"
+            "B. 酥爽跳蛋\n"
+            "C. 吸吮挑逗\n"
+            "D. 快感提升\n"
+            "E. 情趣服飾\n"
+            "F. 雄壯威武\n"
+            "G. 戰力持久\n"
+            "H. 鎖精環\n"
+            "I. 水晶套\n"
+            "J. SM系列\n"
+            "K. 保險套\n"
+            "L. 潤滑液\n"
+            "M. 摳指套\n"
+            "N. 其他",
+        )
+        return True
+
+    if contains_any(text, ["未找零錢", "找零", "沒找零", "少找", "少給", "少找20元", "少找兩百"]):
+        reply_to_line(
+            reply_token,
+            "請先告訴我您是否還在店內。\n"
+            "如果還在店內，請告訴我未找零金額是否大於 200 元。\n"
+            "若大於 200 元，您也可以選擇直接換成商品。\n"
+            "如果不要換商品，請提供收款銀行、分行、帳戶名、帳號，我們會請會計上班時間協助退回。",
+        )
+        return True
+
+    if contains_any(text, ["機器吃錢", "吃錢", "吞錢", "卡錢", "沒吐錢", "少吐錢", "未找零"]):
+        reply_to_line(
+            reply_token,
+            "請告訴我：\n"
+            "1. 大約投了多少錢\n"
+            "2. 大約何時投的\n"
+            "3. 您是否還在店內\n\n"
+            "如果您還在店內，我們可以先幫您開啟需要的商品；若需要退款，請再提供收款銀行、帳戶名與帳號。",
+        )
+        return True
+
+    if contains_any(text, ["更換商品", "換貨", "換商品", "我要換", "想換貨", "退換"]):
+        reply_to_line(
+            reply_token,
+            "請先提供以下資訊：\n"
+            "1. 大約何時購買\n"
+            "2. 是在哪間店購買\n"
+            "3. 購買金額是多少\n"
+            "4. 是否有拆外包封膜\n\n"
+            "我們會請相關服務人員協助處理後續事宜。",
+        )
+        return True
+
+    if contains_any(text, ["瑕疵", "故障", "壞掉", "不能用", "無法運作", "沒開機", "不會震動", "沒反應", "不能震", "沒動"]):
+        reply_to_line(
+            reply_token,
+            "請先提供以下資訊：\n"
+            "1. 大約何時購買\n"
+            "2. 是在哪間店購買\n"
+            "3. 購買金額是多少\n"
+            "4. 故障問題點是什麼\n"
+            "並請附上照片及無法運作的影片。\n\n"
+            "我們會請服務人員盡速協助處理後續事宜。",
+        )
+        return True
+
+    return False
+
+
+def handle_fuzzy_customer_service_intent(text: str, reply_token: str) -> bool:
+    normalized = normalize_text(text)
+    store_fragments = [
+        "中山店", "中山",
+        "大廟店", "大廟",
+        "永和店", "永和",
+        "萬壽店", "萬壽",
+        "戀愛研究室店", "戀愛研究室",
+        "龜山萬壽店", "龜山",
+        "新北永和店", "新北",
+        "輔大店", "輔大",
+        "經國店", "經國",
+        "饒河店", "饒河",
+        "愛國店", "愛國",
+        "孝二店", "孝二",
+        "趣新竹城隍廟店", "城隍廟", "新竹"
+    ]
+
+    if any(keyword in normalized for keyword in [
+        "少找", "少給", "少找20元", "少找兩百", "少了20元", "少了兩百", "找零", "未找零",
+        "少吐錢", "沒吐錢", "吞錢", "卡錢", "吃錢", "機器吃錢",
+        "沒開機", "不會震動", "沒反應", "不能震", "壞掉", "故障", "瑕疵",
+        "更換商品", "換貨", "換商品", "想換貨", "我要換", "外包封膜", "拆外包封膜",
+        "商品目錄", "商品有哪些", "推薦商品", "商品類別", "類別",
+        *store_fragments
+    ]):
+        # Reuse the exact-service handlers so the response stays consistent.
+        if any(keyword in normalized for keyword in ["商品目錄", "商品有哪些", "推薦商品"]):
+            return handle_customer_service_intent("商品目錄", reply_token)
+        if any(keyword in normalized for keyword in ["商品類別", "類別"]):
+            return handle_customer_service_intent("可推薦的商品類別", reply_token)
+        if any(keyword in normalized for keyword in ["少找", "少給", "少找20元", "少找兩百", "少了20元", "少了兩百", "找零", "未找零"]):
+            return handle_customer_service_intent("未找零錢", reply_token)
+        if any(keyword in normalized for keyword in ["少吐錢", "沒吐錢", "吞錢", "卡錢", "吃錢", "機器吃錢"]):
+            return handle_customer_service_intent("機器吃錢", reply_token)
+        if any(keyword in normalized for keyword in ["更換商品", "換貨", "換商品", "想換貨", "我要換", "外包封膜", "拆外包封膜"]):
+            return handle_customer_service_intent("更換商品", reply_token)
+        if any(keyword in normalized for keyword in ["沒開機", "不會震動", "沒反應", "不能震", "壞掉", "故障", "瑕疵"]):
+            return handle_customer_service_intent("商品瑕疵故障", reply_token)
+        if any(fragment in normalized for fragment in store_fragments):
+            # Force the age-gate flow first so store-name fragments do not fall through to AI.
+            return handle_age_gate("密碼", reply_token, None, "text")
+    return False
+
+
 AGE_AFFIRMATIVE = {"1", "是", "是的", "滿了", "已滿", "滿18", "已滿18歲", "滿18歲"}
 AGE_NEGATIVE = {"2", "未滿18歲", "未成年", "不是", "否"}
 
@@ -469,13 +610,19 @@ def handle_age_gate(text: str, reply_token: str, user_id: Optional[str], message
     normalized = text.strip().lower()
     store_passwords = retrieve_store_passwords()
 
+    if any(keyword in normalized for keyword in ["密碼", "門禁", "開門", "進店"]):
+        if user_id:
+            set_user_state(user_id, UserState(age_gate="awaiting_age", pending_store=""))
+        reply_to_line(reply_token, "本店採實名制驗證，如您未滿18歲，請即刻離開本店!請問您滿18歲了嗎? 已滿18歲請回答1，未滿18歲請回覆2")
+        return True
+
     if normalized in AGE_NEGATIVE:
         if user_id:
             set_user_state(user_id, UserState(age_gate="", pending_store=""))
         reply_to_line(reply_token, "因您未滿18歲，請您盡速離開本場所，避免觸法。")
         return True
 
-    if normalized in AGE_AFFIRMATIVE:
+    if contains_any(text, ["已滿18歲", "滿18歲", "已滿18", "滿18", "已滿", "是的", "是", "1"]):
         if user_id:
             set_user_state(user_id, UserState(age_gate="awaiting_store", pending_store=""))
         store_list = format_store_list(list(store_passwords.keys()))
@@ -483,7 +630,7 @@ def handle_age_gate(text: str, reply_token: str, user_id: Optional[str], message
         return True
 
     if message_type == "image" or state.age_gate == "awaiting_age":
-        if message_type == "image" or any(keyword in normalized for keyword in ["密碼", "門禁", "開門", "進店"]):
+        if message_type == "image":
             if user_id:
                 set_user_state(user_id, UserState(age_gate="awaiting_age", pending_store=""))
             reply_to_line(reply_token, "本店採實名制驗證，如您未滿18歲，請即刻離開本店!請問您滿18歲了嗎? 已滿18歲請回答1，未滿18歲請回覆2")
@@ -493,8 +640,10 @@ def handle_age_gate(text: str, reply_token: str, user_id: Optional[str], message
             return True
 
     if state.age_gate == "awaiting_store":
+        store_text = normalize_text(text)
         for store_name, password in store_passwords.items():
-            if store_name in text:
+            normalized_store = normalize_text(store_name)
+            if normalized_store in store_text or store_text in normalized_store or normalized_store.endswith(store_text) or store_text.endswith(normalized_store):
                 if user_id:
                     clear_user_state(user_id)
                 reply_to_line(reply_token, f"{store_name} 的門禁密碼是 {password}")
@@ -521,7 +670,11 @@ def handle_message(event: dict) -> None:
 
     if message_type == "text":
         text = extract_user_text(event) or ""
+        if handle_fuzzy_customer_service_intent(text, reply_token):
+            return
         if handle_age_gate(text, reply_token, user_id, message_type):
+            return
+        if handle_customer_service_intent(text, reply_token):
             return
         try:
             if handle_command(text, reply_token, user_id):
