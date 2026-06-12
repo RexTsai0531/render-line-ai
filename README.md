@@ -16,8 +16,17 @@
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `OPENAI_API_KEY`
+- `OPENAI_API_BASE`，如果你用 NVIDIA 相容 OpenAI API，就填你的 NVIDIA endpoint
 - `OPENAI_MODEL`，預設 `gpt-4.1-mini`
 - `SYSTEM_PROMPT`，選填
+
+如果你的 LLM 是 NVIDIA 提供的 OpenAI 相容模型，通常可以這樣填：
+
+- `OPENAI_API_KEY` = 你的 NVIDIA API Key
+- `OPENAI_API_BASE` = NVIDIA 提供的 OpenAI 相容 base URL
+- `OPENAI_MODEL` = 你的模型名稱，例如 `minimax-m2.7`
+
+如果你的 NVIDIA 服務文件有指定不同的 base URL 或模型名稱，請以那份文件為準。
 
 ## Render 部署
 

@@ -13,7 +13,6 @@ app = Flask(__name__)
 
 
 LINE_API_BASE = "https://api.line.me"
-OPENAI_API_BASE = "https://api.openai.com/v1"
 
 
 def require_env(name: str) -> str:
@@ -39,6 +38,7 @@ def ask_openai(prompt: str) -> str:
     if not api_key:
         return "目前沒有設定 OPENAI_API_KEY，請先完成 Render 環境變數設定。"
 
+    api_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
     model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
     system_prompt = os.getenv(
         "SYSTEM_PROMPT",
@@ -70,7 +70,7 @@ def ask_openai(prompt: str) -> str:
     }
 
     response = requests.post(
-        f"{OPENAI_API_BASE}/responses",
+        f"{api_base.rstrip('/')}/responses",
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -132,8 +132,11 @@ def healthcheck():
     return jsonify({"status": "ok"})
 
 
-@app.post("/webhook")
+@app.route("/webhook", methods=["GET", "POST"])
 def webhook():
+    if request.method == "GET":
+        return jsonify({"ok": True, "method": "GET"})
+
     signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data()
 
