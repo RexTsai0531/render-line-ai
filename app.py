@@ -3,7 +3,6 @@ import hashlib
 import hmac
 import json
 import logging
-import mimetypes
 import os
 import threading
 import time
@@ -13,7 +12,7 @@ from typing import Any, Optional
 
 import requests
 from flask import Flask, abort, jsonify, request
-from supabase import create_client, Client
+from supabase import Client, create_client
 
 
 app = Flask(__name__)
@@ -32,6 +31,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "If the knowledge base does not contain the answer, ask one short clarifying question or tell the user a human agent will help later.\n"
     "Keep replies short, clear, and service-oriented."
 )
+
 KNOWLEDGE_BASE_PATH = Path(os.getenv("KNOWLEDGE_BASE_PATH", "/var/data/knowledge_base.json"))
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -62,16 +62,24 @@ def ensure_data_dir() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def load_json_file(path: Path, default: Any):
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        logging.exception("Failed to load %s", path)
+        return default
+
+
+def save_json_file(path: Path, data: Any) -> None:
+    ensure_data_dir()
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def load_memory_store() -> dict[str, list[MemoryItem]]:
     ensure_data_dir()
-    if not MEMORY_PATH.exists():
-        return {}
-    try:
-        raw = json.loads(MEMORY_PATH.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        logging.exception("Memory store is corrupt, starting empty")
-        return {}
-
+    raw = load_json_file(MEMORY_PATH, {})
     store: dict[str, list[MemoryItem]] = {}
     for user_id, items in raw.items():
         store[user_id] = [MemoryItem(**item) for item in items]
@@ -79,62 +87,25 @@ def load_memory_store() -> dict[str, list[MemoryItem]]:
 
 
 def save_memory_store(store: dict[str, list[MemoryItem]]) -> None:
-    ensure_data_dir()
-    raw: dict[str, list[dict[str, Any]]] = {
-        user_id: [asdict(item) for item in items] for user_id, items in store.items()
-    }
-    MEMORY_PATH.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-MEMORY_LOCK = threading.Lock()
-MEMORY_STORE = load_memory_store()
+    raw = {user_id: [asdict(item) for item in items] for user_id, items in store.items()}
+    save_json_file(MEMORY_PATH, raw)
 
 
 def load_state_store() -> dict[str, UserState]:
     ensure_data_dir()
-    if not STATE_PATH.exists():
-        return {}
-    try:
-        raw = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        logging.exception("State store is corrupt, starting empty")
-        return {}
-
-    store: dict[str, UserState] = {}
-    for user_id, item in raw.items():
-        store[user_id] = UserState(**item)
-    return store
+    raw = load_json_file(STATE_PATH, {})
+    return {user_id: UserState(**item) for user_id, item in raw.items()}
 
 
 def save_state_store(store: dict[str, UserState]) -> None:
-    ensure_data_dir()
     raw = {user_id: asdict(state) for user_id, state in store.items()}
-    STATE_PATH.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+    save_json_file(STATE_PATH, raw)
 
 
+MEMORY_LOCK = threading.Lock()
 STATE_LOCK = threading.Lock()
+MEMORY_STORE = load_memory_store()
 STATE_STORE = load_state_store()
-
-
-def load_knowledge_base() -> list[dict[str, Any]]:
-    if not KNOWLEDGE_BASE_PATH.exists():
-        logging.warning("Knowledge base not found at %s", KNOWLEDGE_BASE_PATH)
-        return []
-    try:
-        raw = json.loads(KNOWLEDGE_BASE_PATH.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        logging.exception("Knowledge base is corrupt")
-        return []
-    return raw.get("entries", [])
-
-
-KNOWLEDGE_BASE = load_knowledge_base()
-
-
-def get_supabase_client() -> Client | None:
-    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-        return None
-    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 
 def get_user_state(user_id: Optional[str]) -> UserState:
@@ -156,13 +127,23 @@ def clear_user_state(user_id: str) -> None:
         save_state_store(STATE_STORE)
 
 
+def load_knowledge_base() -> list[dict[str, Any]]:
+    raw = load_json_file(KNOWLEDGE_BASE_PATH, {})
+    return raw.get("entries", [])
+
+
+KNOWLEDGE_BASE = load_knowledge_base()
+
+
+def get_supabase_client() -> Client | None:
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return None
+    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+
 def verify_line_signature(body: bytes, signature: str) -> bool:
     channel_secret = require_env("LINE_CHANNEL_SECRET")
-    digest = hmac.new(
-        channel_secret.encode("utf-8"),
-        body,
-        hashlib.sha256,
-    ).digest()
+    digest = hmac.new(channel_secret.encode("utf-8"), body, hashlib.sha256).digest()
     expected = base64.b64encode(digest).decode("utf-8")
     return hmac.compare_digest(expected, signature)
 
@@ -207,17 +188,13 @@ def retrieve_knowledge(query: str, limit: int = 4) -> list[dict[str, Any]]:
         except Exception:
             logging.exception("Supabase knowledge retrieval failed, falling back to local knowledge base")
 
-    if not KNOWLEDGE_BASE:
-        return []
     ranked = sorted(
         ((score_entry(entry, query), entry) for entry in KNOWLEDGE_BASE),
         key=lambda item: item[0],
         reverse=True,
     )
     selected = [entry for score, entry in ranked if score > 0][:limit]
-    if not selected:
-        selected = KNOWLEDGE_BASE[:limit]
-    return selected
+    return selected or KNOWLEDGE_BASE[:limit]
 
 
 def retrieve_store_passwords() -> dict[str, str]:
@@ -240,13 +217,10 @@ def retrieve_store_passwords() -> dict[str, str]:
 def build_memory_context(user_id: Optional[str], query: str) -> str:
     if not user_id:
         return ""
-
     with MEMORY_LOCK:
         items = list(MEMORY_STORE.get(user_id, []))
-
     if not items:
         return ""
-
     query_terms = set(normalize_text(query).split())
     scored: list[tuple[int, MemoryItem]] = []
     for item in items:
@@ -254,15 +228,10 @@ def build_memory_context(user_id: Optional[str], query: str) -> str:
         score = len(query_terms & item_terms)
         if score > 0:
             scored.append((score, item))
-
     selected = [item for _, item in sorted(scored, key=lambda pair: (-pair[0], -pair[1].created_at))[:5]]
     if not selected:
         selected = items[-3:]
-
-    lines = ["Relevant memory:"]
-    for item in selected:
-        lines.append(f"- {item.text}")
-    return "\n".join(lines)
+    return "Relevant memory:\n" + "\n".join(f"- {item.text}" for item in selected)
 
 
 def build_knowledge_context(query: str) -> str:
@@ -273,10 +242,7 @@ def build_knowledge_context(query: str) -> str:
     for entry in entries:
         title = entry.get("title", "")
         text = entry.get("text", "")
-        if title:
-            lines.append(f"- {title}: {text}")
-        else:
-            lines.append(f"- {text}")
+        lines.append(f"- {title}: {text}" if title else f"- {text}")
     return "\n".join(lines)
 
 
@@ -293,59 +259,6 @@ def build_guardrails() -> str:
     )
 
 
-AGE_AFFIRMATIVE = {"1", "是", "是的", "滿了", "已滿", "滿18", "已滿18歲", "滿18歲"}
-AGE_NEGATIVE = {"2", "未滿18歲", "未成年", "不是", "否"}
-
-
-def handle_age_gate(text: str, reply_token: str, user_id: Optional[str], message_type: str) -> bool:
-    state = get_user_state(user_id)
-    normalized = text.strip().lower()
-    store_passwords = retrieve_store_passwords()
-
-    if normalized in AGE_NEGATIVE:
-        if user_id:
-            set_user_state(user_id, UserState(age_gate="", pending_store=""))
-        reply_to_line(reply_token, "因您未滿18歲，請您盡速離開本場所，避免觸法。")
-        return True
-
-    if normalized in AGE_AFFIRMATIVE:
-        if user_id:
-            set_user_state(user_id, UserState(age_gate="awaiting_store", pending_store=""))
-        store_list = "、".join(store_passwords.keys()) if store_passwords else "請先提供店名"
-        reply_to_line(reply_token, f"請問您是在哪一間店？可提供店名：{store_list}")
-        return True
-
-    if message_type == "image" or state.age_gate == "awaiting_age":
-        if message_type == "image":
-            if user_id:
-                set_user_state(user_id, UserState(age_gate="awaiting_age", pending_store=""))
-            reply_to_line(reply_token, "本店採實名制驗證，如您未滿18歲，請即刻離開本店!請問您滿18歲了嗎? 已滿18歲請回答1，未滿18歲請回覆2")
-            return True
-
-        if any(keyword in normalized for keyword in ["密碼", "門禁", "開門", "進店"]):
-            if user_id:
-                set_user_state(user_id, UserState(age_gate="awaiting_age", pending_store=""))
-            reply_to_line(reply_token, "本店採實名制驗證，如您未滿18歲，請即刻離開本店!請問您滿18歲了嗎? 已滿18歲請回答1，未滿18歲請回覆2")
-            return True
-
-        if state.age_gate == "awaiting_age":
-            reply_to_line(reply_token, "本店採實名制驗證，如您未滿18歲，請即刻離開本店!請問您滿18歲了嗎? 已滿18歲請回答1，未滿18歲請回覆2")
-            return True
-
-    if state.age_gate == "awaiting_store":
-        for store_name, password in store_passwords.items():
-            if store_name in text:
-                if user_id:
-                    clear_user_state(user_id)
-                reply_to_line(reply_token, f"{store_name} 的門禁密碼是 {password}")
-                return True
-        store_list = "、".join(store_passwords.keys()) if store_passwords else "請先提供店名"
-        reply_to_line(reply_token, f"請先告訴我您是在哪一間店。可提供店名：{store_list}")
-        return True
-
-    return False
-
-
 def memory_summary(user_id: Optional[str]) -> str:
     if not user_id:
         return "No user memory available."
@@ -353,10 +266,7 @@ def memory_summary(user_id: Optional[str]) -> str:
         items = list(MEMORY_STORE.get(user_id, []))
     if not items:
         return "No stored memories."
-    lines = ["Stored memories:"]
-    for item in items[-10:]:
-        lines.append(f"- [{item.id}] {item.text}")
-    return "\n".join(lines)
+    return "Stored memories:\n" + "\n".join(f"- [{item.id}] {item.text}" for item in items[-10:])
 
 
 def add_memory(user_id: str, text: str, kind: str = "fact") -> MemoryItem:
@@ -399,49 +309,22 @@ def reply_to_line(reply_token: str, text: str) -> None:
     channel_access_token = require_env("LINE_CHANNEL_ACCESS_TOKEN")
     response = requests.post(
         f"{LINE_API_BASE}/v2/bot/message/reply",
-        headers={
-            "Authorization": f"Bearer {channel_access_token}",
-            "Content-Type": "application/json",
-        },
+        headers={"Authorization": f"Bearer {channel_access_token}", "Content-Type": "application/json"},
         json={"replyToken": reply_token, "messages": [{"type": "text", "text": text[:5000]}]},
         timeout=30,
     )
-    try:
-        response.raise_for_status()
-    except requests.HTTPError:
-        logging.exception(
-            "LINE reply API error status=%s body=%s",
-            response.status_code,
-            response.text,
-        )
-        raise
+    response.raise_for_status()
 
 
 def push_to_line(user_id: str, text: str) -> None:
     channel_access_token = require_env("LINE_CHANNEL_ACCESS_TOKEN")
     response = requests.post(
         f"{LINE_API_BASE}/v2/bot/message/push",
-        headers={
-            "Authorization": f"Bearer {channel_access_token}",
-            "Content-Type": "application/json",
-        },
+        headers={"Authorization": f"Bearer {channel_access_token}", "Content-Type": "application/json"},
         json={"to": user_id, "messages": [{"type": "text", "text": text[:5000]}]},
         timeout=30,
     )
-    try:
-        response.raise_for_status()
-    except requests.HTTPError:
-        logging.exception(
-            "LINE push API error status=%s body=%s",
-            response.status_code,
-            response.text,
-        )
-        raise
-
-
-def reply_to_line_with_image(reply_token: str, image_bytes: bytes, mime_type: str, prompt: str) -> None:
-    answer = ask_openai(prompt, image_bytes=image_bytes, image_mime_type=mime_type)
-    reply_to_line(reply_token, answer)
+    response.raise_for_status()
 
 
 def extract_user_text(event: dict) -> Optional[str]:
@@ -468,8 +351,7 @@ def download_line_content(message_id: str) -> tuple[bytes, str]:
         timeout=30,
     )
     response.raise_for_status()
-    mime_type = response.headers.get("Content-Type", "application/octet-stream")
-    return response.content, mime_type
+    return response.content, response.headers.get("Content-Type", "application/octet-stream")
 
 
 def to_data_url(image_bytes: bytes, mime_type: str) -> str:
@@ -491,12 +373,7 @@ def ask_openai(prompt: str, *, image_bytes: bytes | None = None, image_mime_type
     system_prompt = os.getenv("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
 
     selected_model = vision_model if image_bytes else model
-    messages: list[dict[str, Any]] = [
-        {
-            "role": "system",
-            "content": f"{system_prompt}\n\n{build_guardrails()}",
-        }
-    ]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": f"{system_prompt}\n\n{build_guardrails()}"}]
 
     if image_bytes and image_mime_type:
         user_content = [
@@ -508,32 +385,19 @@ def ask_openai(prompt: str, *, image_bytes: bytes | None = None, image_mime_type
 
     messages.append({"role": "user", "content": user_content})
 
-    payload = {
-        "model": selected_model,
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "top_p": top_p,
-    }
-
     response = requests.post(
         f"{api_base.rstrip('/')}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json={
+            "model": selected_model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "top_p": top_p,
         },
-        json=payload,
         timeout=request_timeout,
     )
-    try:
-        response.raise_for_status()
-    except requests.HTTPError:
-        logging.exception(
-            "OpenAI-compatible API error status=%s body=%s",
-            response.status_code,
-            response.text,
-        )
-        raise
+    response.raise_for_status()
 
     data = response.json()
     choices = data.get("choices", [])
@@ -542,14 +406,11 @@ def ask_openai(prompt: str, *, image_bytes: bytes | None = None, image_mime_type
         content = message.get("content")
         if content:
             return str(content).strip()
-
-    logging.warning("No text returned from OpenAI-compatible API response: %s", data)
     return "AI returned an empty response."
 
 
 def handle_command(text: str, reply_token: str, user_id: Optional[str]) -> bool:
     normalized = text.strip().lower()
-
     if normalized in {"help", "/help", "說明", "說明一下"}:
         reply_to_line(
             reply_token,
@@ -562,13 +423,11 @@ def handle_command(text: str, reply_token: str, user_id: Optional[str]) -> bool:
             "- image <說明>: 對圖片提問",
         )
         return True
-
     if normalized in {"reset", "/reset", "清除", "重置"}:
         if user_id:
             clear_memories(user_id)
         reply_to_line(reply_token, "已清除你的記憶庫。")
         return True
-
     if normalized.startswith("remember "):
         if not user_id:
             reply_to_line(reply_token, "目前無法建立記憶，因為找不到 userId。")
@@ -576,14 +435,9 @@ def handle_command(text: str, reply_token: str, user_id: Optional[str]) -> bool:
         item = add_memory(user_id, text.split(" ", 1)[1])
         reply_to_line(reply_token, f"已記住這條資料 #{item.id}。")
         return True
-
     if normalized in {"memories", "/memories"}:
-        if not user_id:
-            reply_to_line(reply_token, "目前沒有可讀取的個人記憶。")
-            return True
         reply_to_line(reply_token, memory_summary(user_id))
         return True
-
     if normalized.startswith("forget "):
         if not user_id:
             reply_to_line(reply_token, "目前無法刪除記憶，因為找不到 userId。")
@@ -592,17 +446,58 @@ def handle_command(text: str, reply_token: str, user_id: Optional[str]) -> bool:
         removed = forget_memory(user_id, target)
         reply_to_line(reply_token, f"已刪除 {removed} 筆記憶。")
         return True
+    return False
+
+
+AGE_AFFIRMATIVE = {"1", "是", "是的", "滿了", "已滿", "滿18", "已滿18歲", "滿18歲"}
+AGE_NEGATIVE = {"2", "未滿18歲", "未成年", "不是", "否"}
+
+
+def handle_age_gate(text: str, reply_token: str, user_id: Optional[str], message_type: str) -> bool:
+    state = get_user_state(user_id)
+    normalized = text.strip().lower()
+    store_passwords = retrieve_store_passwords()
+
+    if normalized in AGE_NEGATIVE:
+        if user_id:
+            set_user_state(user_id, UserState(age_gate="", pending_store=""))
+        reply_to_line(reply_token, "因您未滿18歲，請您盡速離開本場所，避免觸法。")
+        return True
+
+    if normalized in AGE_AFFIRMATIVE:
+        if user_id:
+            set_user_state(user_id, UserState(age_gate="awaiting_store", pending_store=""))
+        store_list = "、".join(store_passwords.keys()) if store_passwords else "請先提供店名"
+        reply_to_line(reply_token, f"請問您是在哪一間店？可提供店名：{store_list}")
+        return True
+
+    if message_type == "image" or state.age_gate == "awaiting_age":
+        if message_type == "image" or any(keyword in normalized for keyword in ["密碼", "門禁", "開門", "進店"]):
+            if user_id:
+                set_user_state(user_id, UserState(age_gate="awaiting_age", pending_store=""))
+            reply_to_line(reply_token, "本店採實名制驗證，如您未滿18歲，請即刻離開本店!請問您滿18歲了嗎? 已滿18歲請回答1，未滿18歲請回覆2")
+            return True
+        if state.age_gate == "awaiting_age":
+            reply_to_line(reply_token, "本店採實名制驗證，如您未滿18歲，請即刻離開本店!請問您滿18歲了嗎? 已滿18歲請回答1，未滿18歲請回覆2")
+            return True
+
+    if state.age_gate == "awaiting_store":
+        for store_name, password in store_passwords.items():
+            if store_name in text:
+                if user_id:
+                    clear_user_state(user_id)
+                reply_to_line(reply_token, f"{store_name} 的門禁密碼是 {password}")
+                return True
+        store_list = "、".join(store_passwords.keys()) if store_passwords else "請先提供店名"
+        reply_to_line(reply_token, f"請先告訴我您是在哪一間店。可提供店名：{store_list}")
+        return True
 
     return False
 
 
 def summarize_for_prompt(user_id: Optional[str], text: str) -> str:
-    memory_context = build_memory_context(user_id, text)
-    knowledge_context = build_knowledge_context(text)
-    parts = [part for part in [knowledge_context, memory_context] if part]
-    if not parts:
-        return text
-    return "\n\n".join(parts + [f"User message:\n{text}"])
+    parts = [part for part in [build_knowledge_context(text), build_memory_context(user_id, text)] if part]
+    return "\n\n".join(parts + [f"User message:\n{text}"]) if parts else text
 
 
 def handle_message(event: dict) -> None:
@@ -647,14 +542,15 @@ def handle_message(event: dict) -> None:
         if not message_id:
             reply_to_line(reply_token, "I could not read that image message.")
             return
-
         try:
             image_bytes, mime_type = download_line_content(message_id)
-            prompt = "Please inspect this image carefully and explain what you see in Traditional Chinese."
-            answer = ask_openai(prompt, image_bytes=image_bytes, image_mime_type=mime_type)
+            answer = ask_openai(
+                "Please inspect this image carefully and explain what you see in Traditional Chinese.",
+                image_bytes=image_bytes,
+                image_mime_type=mime_type,
+            )
         except requests.RequestException as exc:
             answer = f"Image analysis temporarily unavailable: {exc.__class__.__name__}"
-
         try:
             if user_id:
                 push_to_line(user_id, answer)
@@ -682,16 +578,12 @@ def webhook():
 
     signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data()
-
     if not signature or not verify_line_signature(body, signature):
         abort(400, description="Invalid LINE signature")
 
     payload = request.get_json(silent=True) or {}
-    events = payload.get("events", [])
-
-    for event in events:
+    for event in payload.get("events", []):
         threading.Thread(target=handle_message, args=(event,), daemon=True).start()
-
     return jsonify({"ok": True})
 
 
