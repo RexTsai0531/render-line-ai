@@ -47,30 +47,14 @@ def ask_openai(prompt: str) -> str:
 
     payload = {
         "model": model,
-        "input": [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": system_prompt,
-                    }
-                ],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": prompt,
-                    }
-                ],
-            },
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
         ],
     }
 
     response = requests.post(
-        f"{api_base.rstrip('/')}/responses",
+        f"{api_base.rstrip('/')}/chat/completions",
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -90,17 +74,12 @@ def ask_openai(prompt: str) -> str:
 
     data = response.json()
 
-    text = data.get("output_text")
-    if text:
-        return text.strip()
-
-    output = data.get("output", [])
-    for item in output:
-        for content in item.get("content", []):
-            if content.get("type") in {"output_text", "text"}:
-                value = content.get("text") or content.get("value")
-                if value:
-                    return str(value).strip()
+    choices = data.get("choices", [])
+    if choices:
+        message = choices[0].get("message", {})
+        content = message.get("content")
+        if content:
+            return str(content).strip()
 
     logging.warning("No text returned from OpenAI-compatible API response: %s", data)
     return "AI returned an empty response."
