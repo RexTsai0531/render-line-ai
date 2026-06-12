@@ -18,16 +18,18 @@
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `OPENAI_API_KEY`
 - `OPENAI_API_BASE`，如果你用 NVIDIA 相容 OpenAI API，就填你的 NVIDIA endpoint
-- `OPENAI_MODEL`，預設 `llama-3.1-8b-instruct`
+- `OPENAI_MODEL`，預設 `meta/llama-3.1-8b-instruct`
 - `OPENAI_TIMEOUT_SECONDS`，選填，預設 `60`
-- `OPENAI_MAX_TOKENS`，選填，預設 `256`
+- `OPENAI_MAX_TOKENS`，選填，預設 `1024`
+- `OPENAI_TEMPERATURE`，選填，預設 `0.2`
+- `OPENAI_TOP_P`，選填，預設 `0.7`
 - `SYSTEM_PROMPT`，選填
 
 如果你的 LLM 是 NVIDIA 提供的 OpenAI 相容模型，通常可以這樣填：
 
 - `OPENAI_API_KEY` = 你的 NVIDIA API Key
 - `OPENAI_API_BASE` = NVIDIA 提供的 OpenAI 相容 base URL
-- `OPENAI_MODEL` = 你的模型名稱，例如 `llama-3.1-8b-instruct`
+- `OPENAI_MODEL` = 你的模型名稱，例如 `meta/llama-3.1-8b-instruct`
 
 如果你的 NVIDIA 服務文件有指定不同的 base URL 或模型名稱，請以那份文件為準。
 
