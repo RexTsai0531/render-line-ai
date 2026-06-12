@@ -26,6 +26,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "Be concise, natural, and practical. If relevant memory is provided, use it before answering. "
     "If a user has given profile facts, apply them carefully."
 )
+KNOWLEDGE_BASE_PATH = Path(os.getenv("KNOWLEDGE_BASE_PATH", "/var/data/knowledge_base.json"))
 
 
 @dataclass
@@ -75,6 +76,21 @@ MEMORY_LOCK = threading.Lock()
 MEMORY_STORE = load_memory_store()
 
 
+def load_knowledge_base() -> list[dict[str, Any]]:
+    if not KNOWLEDGE_BASE_PATH.exists():
+        logging.warning("Knowledge base not found at %s", KNOWLEDGE_BASE_PATH)
+        return []
+    try:
+        raw = json.loads(KNOWLEDGE_BASE_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        logging.exception("Knowledge base is corrupt")
+        return []
+    return raw.get("entries", [])
+
+
+KNOWLEDGE_BASE = load_knowledge_base()
+
+
 def verify_line_signature(body: bytes, signature: str) -> bool:
     channel_secret = require_env("LINE_CHANNEL_SECRET")
     digest = hmac.new(
@@ -88,6 +104,34 @@ def verify_line_signature(body: bytes, signature: str) -> bool:
 
 def normalize_text(text: str) -> str:
     return " ".join(text.lower().split())
+
+
+def score_entry(entry: dict[str, Any], query: str) -> int:
+    query_norm = normalize_text(query)
+    tags = [normalize_text(tag) for tag in entry.get("tags", [])]
+    text = normalize_text(entry.get("text", ""))
+    score = 0
+    for tag in tags:
+        if tag and tag in query_norm:
+            score += 4
+    for term in query_norm.split():
+        if term and term in text:
+            score += 1
+    return score
+
+
+def retrieve_knowledge(query: str, limit: int = 4) -> list[dict[str, Any]]:
+    if not KNOWLEDGE_BASE:
+        return []
+    ranked = sorted(
+        ((score_entry(entry, query), entry) for entry in KNOWLEDGE_BASE),
+        key=lambda item: item[0],
+        reverse=True,
+    )
+    selected = [entry for score, entry in ranked if score > 0][:limit]
+    if not selected:
+        selected = KNOWLEDGE_BASE[:limit]
+    return selected
 
 
 def build_memory_context(user_id: Optional[str], query: str) -> str:
@@ -116,6 +160,27 @@ def build_memory_context(user_id: Optional[str], query: str) -> str:
     for item in selected:
         lines.append(f"- {item.text}")
     return "\n".join(lines)
+
+
+def build_knowledge_context(query: str) -> str:
+    entries = retrieve_knowledge(query)
+    if not entries:
+        return ""
+    lines = ["RAG knowledge base:"]
+    for entry in entries:
+        lines.append(f"- {entry.get('text', '')}")
+    return "\n".join(lines)
+
+
+def build_guardrails() -> str:
+    return (
+        "Follow these rules strictly:\n"
+        "1. Identify yourself as AI客服 when appropriate.\n"
+        "2. If the user asks for age/password verification, use the age-gate flow from the knowledge base.\n"
+        "3. If the information is missing or uncertain, do not invent answers.\n"
+        "4. If the answer is not in the knowledge base, ask a clarifying question or request human follow-up.\n"
+        "5. Keep tone professional, warm, and concise."
+    )
 
 
 def memory_summary(user_id: Optional[str]) -> str:
@@ -263,7 +328,12 @@ def ask_openai(prompt: str, *, image_bytes: bytes | None = None, image_mime_type
     system_prompt = os.getenv("SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
 
     selected_model = vision_model if image_bytes else model
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": f"{system_prompt}\n\n{build_guardrails()}",
+        }
+    ]
 
     if image_bytes and image_mime_type:
         user_content = [
@@ -365,9 +435,11 @@ def handle_command(text: str, reply_token: str, user_id: Optional[str]) -> bool:
 
 def summarize_for_prompt(user_id: Optional[str], text: str) -> str:
     memory_context = build_memory_context(user_id, text)
-    if not memory_context:
+    knowledge_context = build_knowledge_context(text)
+    parts = [part for part in [knowledge_context, memory_context] if part]
+    if not parts:
         return text
-    return f"{memory_context}\n\nUser message:\n{text}"
+    return "\n\n".join(parts + [f"User message:\n{text}"])
 
 
 def handle_message(event: dict) -> None:

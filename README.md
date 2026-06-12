@@ -9,6 +9,7 @@
 - 圖片訊息可送進 vision model 分析
 - 支援 `help`、`reset`、`remember`、`memories`、`forget`
 - 會根據個人記憶庫，在回覆前先把相關資訊放進提示詞
+- 會先檢索私有磁碟上的 RAG 規則，再把命中的規則塞進回答上下文
 
 ## 環境變數
 
@@ -44,6 +45,13 @@ OPENAI_VISION_MODEL=meta/llama-3.1-8b-instruct
 - `memories`：查看目前記憶
 - `forget <id 或 關鍵字>`：刪除某條記憶
 
+## RAG 知識庫
+
+- 預設路徑：`/var/data/knowledge_base.json`
+- 這裡放客服規則、話術、分類規則、門禁密碼等私有內容
+- bot 回覆前會先檢索相關條目，再把命中的規則交給 LLM
+- 這份檔案請放在 Render 私有磁碟，不要提交到 GitHub
+
 ## 圖片
 
 直接傳圖片給 bot，若模型支援 vision，就會嘗試分析圖片內容。
@@ -55,6 +63,8 @@ OPENAI_VISION_MODEL=meta/llama-3.1-8b-instruct
 3. Build Command 設成 `pip install -r requirements.txt`
 4. Start Command 設成 `gunicorn wsgi:app --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 120`
 5. 把 LINE Webhook URL 設成 `https://你的服務網址/webhook`
+6. 在 Render 加一個 Private Disk，掛載到 `/var/data`
+7. 在那個磁碟裡建立 `knowledge_base.json`
 
 ## LINE 設定
 
