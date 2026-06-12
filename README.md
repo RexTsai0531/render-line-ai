@@ -18,6 +18,7 @@
 - `OPENAI_API_KEY`
 - `OPENAI_API_BASE`，如果你用 NVIDIA 相容 OpenAI API，就填你的 NVIDIA endpoint
 - `OPENAI_MODEL`，預設 `gpt-4.1-mini`
+- `OPENAI_TIMEOUT_SECONDS`，選填，預設 `60`
 - `SYSTEM_PROMPT`，選填
 
 如果你的 LLM 是 NVIDIA 提供的 OpenAI 相容模型，通常可以這樣填：

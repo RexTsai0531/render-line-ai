@@ -40,6 +40,7 @@ def ask_openai(prompt: str) -> str:
 
     api_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
     model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+    request_timeout = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
     system_prompt = os.getenv(
         "SYSTEM_PROMPT",
         "You are a helpful LINE AI assistant. Reply in Traditional Chinese and be concise.",
@@ -60,10 +61,13 @@ def ask_openai(prompt: str) -> str:
             "Content-Type": "application/json",
         },
         json=payload,
-        timeout=30,
+        timeout=request_timeout,
     )
     try:
         response.raise_for_status()
+    except requests.ReadTimeout:
+        logging.exception("OpenAI-compatible API request timed out after %s seconds", request_timeout)
+        raise
     except requests.HTTPError:
         logging.exception(
             "OpenAI-compatible API error status=%s body=%s",
