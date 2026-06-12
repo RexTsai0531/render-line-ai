@@ -10,6 +10,7 @@ This is a LINE AI customer-service bot for Render.
 - Supports `help`, `reset`, `remember`, `memories`, `forget`
 - Uses a private knowledge base from Supabase for RAG
 - Uses per-user memory to personalize answers
+- Runs in a strict customer-service mode that prefers RAG rules over free-form generation
 
 ## Environment Variables
 
@@ -50,6 +51,8 @@ Use `work/supabase_rag_schema.sql` to create:
 - RLS policy
 
 The bot will call Supabase first. If Supabase is unavailable, it falls back to local knowledge storage.
+
+Use `work/supabase_knowledge_seed.sql` to seed the private客服 knowledge base.
 
 ## Commands
 
