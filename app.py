@@ -154,6 +154,20 @@ def extract_user_text(event: dict) -> Optional[str]:
     return message.get("text")
 
 
+def handle_command(text: str, reply_token: str) -> bool:
+    normalized = text.strip().lower()
+    if normalized in {"help", "/help", "說明", "說明一下"}:
+        reply_to_line(
+            reply_token,
+            "可用指令：\n- help: 看指令說明\n- reset: 目前沒有對話記憶可清除",
+        )
+        return True
+    if normalized in {"reset", "/reset", "清除", "重置"}:
+        reply_to_line(reply_token, "目前還沒有啟用對話記憶，所以不用特別清除。")
+        return True
+    return False
+
+
 def handle_message(event: dict) -> None:
     reply_token = event.get("replyToken")
     if not reply_token:
@@ -165,6 +179,13 @@ def handle_message(event: dict) -> None:
             reply_to_line(reply_token, "Only text messages are supported.")
         except requests.RequestException:
             logging.exception("Failed to send non-text warning")
+        return
+
+    try:
+        if handle_command(text, reply_token):
+            return
+    except requests.RequestException:
+        logging.exception("Failed to handle command")
         return
 
     user_id = (event.get("source") or {}).get("userId")
