@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 import requests
 from flask import Flask, abort, jsonify, request
+from supabase import create_client, Client
 
 
 app = Flask(__name__)
@@ -27,6 +28,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "If a user has given profile facts, apply them carefully."
 )
 KNOWLEDGE_BASE_PATH = Path(os.getenv("KNOWLEDGE_BASE_PATH", "/var/data/knowledge_base.json"))
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 
 @dataclass
@@ -91,6 +94,12 @@ def load_knowledge_base() -> list[dict[str, Any]]:
 KNOWLEDGE_BASE = load_knowledge_base()
 
 
+def get_supabase_client() -> Client | None:
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return None
+    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+
 def verify_line_signature(body: bytes, signature: str) -> bool:
     channel_secret = require_env("LINE_CHANNEL_SECRET")
     digest = hmac.new(
@@ -121,6 +130,27 @@ def score_entry(entry: dict[str, Any], query: str) -> int:
 
 
 def retrieve_knowledge(query: str, limit: int = 4) -> list[dict[str, Any]]:
+    client = get_supabase_client()
+    if client is not None:
+        try:
+            result = client.rpc(
+                "search_knowledge_chunks",
+                {"query_text": query, "match_limit": limit},
+            ).execute()
+            data = result.data or []
+            if data:
+                return [
+                    {
+                        "id": row.get("id"),
+                        "title": row.get("title", ""),
+                        "text": row.get("content", ""),
+                        "tags": row.get("tags", []),
+                    }
+                    for row in data
+                ]
+        except Exception:
+            logging.exception("Supabase knowledge retrieval failed, falling back to local knowledge base")
+
     if not KNOWLEDGE_BASE:
         return []
     ranked = sorted(
@@ -168,7 +198,12 @@ def build_knowledge_context(query: str) -> str:
         return ""
     lines = ["RAG knowledge base:"]
     for entry in entries:
-        lines.append(f"- {entry.get('text', '')}")
+        title = entry.get("title", "")
+        text = entry.get("text", "")
+        if title:
+            lines.append(f"- {title}: {text}")
+        else:
+            lines.append(f"- {text}")
     return "\n".join(lines)
 
 

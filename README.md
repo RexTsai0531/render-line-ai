@@ -1,86 +1,83 @@
 # Render LINE AI Bot
 
-這是一個可部署到 Render 的 LINE AI 機器人。
+This is a LINE AI customer-service bot for Render.
 
-## 功能
+## Features
 
-- 驗證 LINE Webhook 簽章
-- 文字訊息自動呼叫 NVIDIA LLM
-- 圖片訊息可送進 vision model 分析
-- 支援 `help`、`reset`、`remember`、`memories`、`forget`
-- 會根據個人記憶庫，在回覆前先把相關資訊放進提示詞
-- 會先檢索私有磁碟上的 RAG 規則，再把命中的規則塞進回答上下文
+- Verifies LINE webhook signatures
+- Calls NVIDIA LLM for text replies
+- Supports image analysis
+- Supports `help`, `reset`, `remember`, `memories`, `forget`
+- Uses a private knowledge base from Supabase for RAG
+- Uses per-user memory to personalize answers
 
-## 環境變數
+## Environment Variables
 
-請在 Render 的 Environment 區設定：
+Set these in Render:
 
 - `LINE_CHANNEL_SECRET`
 - `LINE_CHANNEL_ACCESS_TOKEN`
 - `OPENAI_API_KEY`
-- `OPENAI_API_BASE`，NVIDIA OpenAI 相容 base URL
-- `OPENAI_MODEL`，預設 `meta/llama-3.1-8b-instruct`
-- `OPENAI_VISION_MODEL`，選填，圖片分析用模型，預設同 `OPENAI_MODEL`
-- `OPENAI_TIMEOUT_SECONDS`，預設 `60`
-- `OPENAI_MAX_TOKENS`，預設 `1024`
-- `OPENAI_TEMPERATURE`，預設 `0.2`
-- `OPENAI_TOP_P`，預設 `0.7`
-- `SYSTEM_PROMPT`，選填
-- `BOT_DATA_DIR`，選填，預設 `data`
+- `OPENAI_API_BASE` - NVIDIA OpenAI-compatible base URL
+- `OPENAI_MODEL` - default `meta/llama-3.1-8b-instruct`
+- `OPENAI_VISION_MODEL` - optional, defaults to `OPENAI_MODEL`
+- `OPENAI_TIMEOUT_SECONDS` - default `60`
+- `OPENAI_MAX_TOKENS` - default `1024`
+- `OPENAI_TEMPERATURE` - default `0.2`
+- `OPENAI_TOP_P` - default `0.7`
+- `SYSTEM_PROMPT` - optional
+- `BOT_DATA_DIR` - optional, default `data`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
-範例：
+Example:
 
 ```text
-OPENAI_API_KEY=你的NVIDIA_API_KEY
+OPENAI_API_KEY=your_nvidia_api_key
 OPENAI_API_BASE=https://integrate.api.nvidia.com/v1
 OPENAI_MODEL=meta/llama-3.1-8b-instruct
 OPENAI_VISION_MODEL=meta/llama-3.1-8b-instruct
+SUPABASE_URL=https://xxxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 ```
 
-## 指令
+## Supabase RAG
 
-- `help`：顯示指令說明
-- `reset`：清除你的個人記憶庫
-- `remember <內容>`：新增一條記憶
-- `memories`：查看目前記憶
-- `forget <id 或 關鍵字>`：刪除某條記憶
+Use `work/supabase_rag_schema.sql` to create:
 
-## RAG 知識庫
+- `knowledge_chunks` table
+- `search_knowledge_chunks()` RPC
+- RLS policy
 
-- 預設路徑：`/var/data/knowledge_base.json`
-- 這裡放客服規則、話術、分類規則、門禁密碼等私有內容
-- bot 回覆前會先檢索相關條目，再把命中的規則交給 LLM
-- 這份檔案請放在 Render 私有磁碟，不要提交到 GitHub
+The bot will call Supabase first. If Supabase is unavailable, it falls back to local knowledge storage.
 
-## 圖片
+## Commands
 
-直接傳圖片給 bot，若模型支援 vision，就會嘗試分析圖片內容。
+- `help` - show available commands
+- `reset` - clear your personal memory
+- `remember <text>` - add a memory
+- `memories` - list memory items
+- `forget <id or keyword>` - delete memory items
 
-## Render 部署
+## Render Deploy
 
-1. 將專案推到 GitHub
-2. 在 Render 建立 Web Service
-3. Build Command 設成 `pip install -r requirements.txt`
-4. Start Command 設成 `gunicorn wsgi:app --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 120`
-5. 把 LINE Webhook URL 設成 `https://你的服務網址/webhook`
-6. 在 Render 加一個 Private Disk，掛載到 `/var/data`
-7. 在那個磁碟裡建立 `knowledge_base.json`
+1. Push code to GitHub
+2. Create a Web Service on Render
+3. Set Build Command to `pip install -r requirements.txt`
+4. Set Start Command to `gunicorn wsgi:app --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 120`
+5. Set LINE Webhook URL to `https://your-service-url/webhook`
 
-## LINE 設定
+## LINE Setup
 
-- 在 LINE Developers 建立 Messaging API channel
-- 取得 Channel Secret 與 Channel Access Token
-- 開啟 Webhook
-- 關掉 Auto-reply
+- Create a Messaging API channel in LINE Developers
+- Copy Channel Secret and Channel Access Token
+- Enable Webhook
+- Disable Auto-reply
 
-## 本機測試
+## Local Test
 
 ```bash
 python app.py
 ```
 
-打開 `http://127.0.0.1:10000/` 應該會看到 `{"status":"ok"}`
-
-## 注意
-
-記憶庫目前儲存在 `BOT_DATA_DIR` 指定的本機檔案中。若 Render 執行環境沒有持久化磁碟，重新部署或重建後記憶可能會消失。
+Open `http://127.0.0.1:10000/` and you should see `{"status":"ok"}`.
