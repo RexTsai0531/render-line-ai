@@ -40,8 +40,9 @@ def ask_openai(prompt: str) -> str:
         return "Missing OPENAI_API_KEY in Render environment variables."
 
     api_base = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
-    model = os.getenv("OPENAI_MODEL", "step-3.7-flash")
+    model = os.getenv("OPENAI_MODEL", "llama-3.1-8b-instruct")
     request_timeout = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
+    max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "256"))
     system_prompt = os.getenv(
         "SYSTEM_PROMPT",
         "You are a helpful LINE AI assistant. Reply in Traditional Chinese and be concise.",
@@ -53,6 +54,7 @@ def ask_openai(prompt: str) -> str:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
         ],
+        "max_tokens": max_tokens,
     }
 
     response = requests.post(
